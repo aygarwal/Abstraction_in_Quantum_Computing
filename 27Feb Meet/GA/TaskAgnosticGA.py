@@ -6,7 +6,7 @@ from abc import ABC, abstractmethod
 # --- GA PARAMETERS ---
 MAX_DEPTH       = 40
 POP_SIZE        = 2000
-NUM_GENERATIONS = 100
+NUM_GENERATIONS = 300
 DEF_MUT_RATE    = 0.3
 DEF_MUT_BOOST_COOLDOWN = 10
 STAG_THRESH     = 15
@@ -16,16 +16,6 @@ ROULETTE   = "roulette"
 
 rng = np.random.default_rng()
 
-# --- ALLOWED GATES ---
-single_parametrised_gates = [] # [qml.RX, qml.RY, qml.RZ]
-single_gates = [
-        qml.Hadamard, 
-        qml.PauliX, qml.PauliY, qml.PauliZ, 
-        qml.S, qml.T,
-        # single_parametrised_gates
-    ]
-multi_gates = [qml.CNOT, qml.CZ, qml.Toffoli, qml.MultiControlledX]
-
 # ==========================================
 # TASK INTERFACE
 # ==========================================
@@ -34,9 +24,10 @@ class SynthesisTask(ABC):
     Abstract base class for any quantum synthesis problem.
     The GA will only interact with this interface.
     """
-    def __init__(self, n_qubits):
-        self.n_qubits = n_qubits # The task now owns the qubit count
-        
+    def __init__(self, n_qubits, gates):
+        self.n_qubits = n_qubits
+        self.gates = gates
+
     @abstractmethod
     def evaluate(self, structure) -> float: 
         pass
@@ -52,10 +43,15 @@ class UnitaryDecompositionTask(SynthesisTask):
     """
     Specific implementation for synthesizing a circuit that matches a Target Unitary Matrix.
     """
-    def __init__(self, target_matrix, n_qubits):
+    def __init__(self, target_matrix, n_qubits, gates):
         self.target = target_matrix
         self.n_qubits = n_qubits
+        self.gates = gates
         self.dev = qml.device('default.qubit', wires=n_qubits)
+
+        single_gates = gates[0]
+        single_parametrised_gates = gates[1]
+        multi_gates = gates[2]
         
         # We define the exec_circuit QNode inside the task so it binds to the task's device
         @qml.qnode(self.dev)
@@ -100,8 +96,13 @@ class UnitaryDecompositionTask(SynthesisTask):
 # ==========================================
 # GENETIC ALGORITHM
 # ==========================================
-def gen_circuit_structure(n_qubits, single_gate_pref=0.5):
+def gen_circuit_structure(n_qubits, gates, single_gate_pref=0.5):
     depth = rng.choice(range(1, MAX_DEPTH + 1))
+
+    single_gates = gates[0]
+    single_parametrised_gates = gates[1]
+    multi_gates = gates[2]
+
     if n_qubits < 2: single_gate_pref = 1
     structure = []
 
@@ -131,7 +132,7 @@ def create_population(pop_size, task):
     population = []
     fitnesses = []
     for i in range(pop_size):
-        structure = gen_circuit_structure(task.n_qubits)
+        structure = gen_circuit_structure(task.n_qubits, task.gates)
         population.append(structure)
         fitness = task.evaluate(structure)
         fitnesses.append(fitness)
@@ -167,14 +168,14 @@ def crossover(parent1, parent2):
     child2 = parent2[:len1] + parent1[-len2:]
     return copy.deepcopy(child1), copy.deepcopy(child2)
 
-def mutate(ind, n_qubits, mutation_rate=DEF_MUT_RATE):
+def mutate(ind, n_qubits, gates, mutation_rate=DEF_MUT_RATE):
     ind = copy.deepcopy(ind)
     if rng.random() > mutation_rate: 
         return ind
 
     # Angle mutation
     for gene in ind:
-        if len(gene) == 3 and gene[0] in single_parametrised_gates:
+        if len(gene) == 3 and gene[0] in gates[1]:
             if rng.random() < 0.6:
                 gene[2] = (gene[2] + rng.normal(0, 0.3)) % (2 * np.pi)
     
@@ -185,7 +186,7 @@ def mutate(ind, n_qubits, mutation_rate=DEF_MUT_RATE):
     # Gate/Wire Mutation
     if rng.random() < 0.3:
         is_single = not isinstance(ind[idx][1], list)
-        new_gate = rng.choice(single_gates) if is_single else rng.choice(multi_gates)
+        new_gate = rng.choice(gates[0]) if is_single else rng.choice(gates[2])
         ind[idx][0] = new_gate
         
         # Robustly determine wires for the new gate
@@ -206,7 +207,7 @@ def mutate(ind, n_qubits, mutation_rate=DEF_MUT_RATE):
         if rng.random() < 0.5 and len(ind) > 1:
             del ind[idx]
         else:
-            ind.append(gen_circuit_structure(n_qubits, single_gate_pref=0.5)[0])
+            ind.append(gen_circuit_structure(n_qubits, gates, single_gate_pref=0.5)[0])
             
     return ind
 
@@ -219,6 +220,7 @@ def eval_pop(population, task):
 
 def genetic_algorithm(task: SynthesisTask, elitism_frac=0.2):
     N_QUBITS = task.n_qubits
+    gates = task.gates
     population, fitnesses = create_population(pop_size=POP_SIZE, task=task)
     population, fitnesses = sort_pop(population, fitnesses)
 
@@ -255,8 +257,8 @@ def genetic_algorithm(task: SynthesisTask, elitism_frac=0.2):
         for _ in range(int((POP_SIZE - num_elites) / 2)):
             parent1, parent2 = select_parents(population, fitnesses, TOURNAMENT) # type: ignore
             child1, child2 = crossover(parent1, parent2)
-            children.append(mutate(child1, N_QUBITS))
-            children.append(mutate(child2, N_QUBITS))
+            children.append(mutate(child1, N_QUBITS, gates))
+            children.append(mutate(child2, N_QUBITS, gates))
 
         population = children
         fitnesses = eval_pop(population, task) # Pass task here
@@ -285,7 +287,22 @@ if __name__ == "__main__":
     print("--- Starting Unitary Decomposition Task ---")
     my_target = random_unitary(2**N_QUBITS)
     
+    default_gate_set = [
+                        [   # single gates
+                            qml.Hadamard, 
+                            qml.PauliX, qml.PauliY, qml.PauliZ, 
+                            qml.S, qml.T,
+                            [qml.RX, qml.RY, qml.RZ]
+                        ],
+                        [   # single paramtrised gates
+                            qml.RX, qml.RY, qml.RZ
+                        ],
+                        [   # multi gates
+                            qml.CNOT, qml.CZ, qml.Toffoli, qml.MultiControlledX
+                        ]
+                    ]
+
     # Instantiate the specific task
-    my_task = UnitaryDecompositionTask(target_matrix=my_target, n_qubits=N_QUBITS)
+    my_task = UnitaryDecompositionTask(target_matrix=my_target, n_qubits=N_QUBITS, gates=default_gate_set)
     # Run the synthesizer
     genetic_algorithm(task=my_task)

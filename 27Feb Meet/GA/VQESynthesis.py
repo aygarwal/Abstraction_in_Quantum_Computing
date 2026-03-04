@@ -1,11 +1,22 @@
 import pennylane as qml
-from TaskAgnosticGA import SynthesisTask, genetic_algorithm, single_parametrised_gates
+from TaskAgnosticGA import SynthesisTask, genetic_algorithm
+import numpy as np
+
+# --- ALLOWED GATES ---
+single_parametrised_gates = [qml.RX, qml.RY, qml.RZ]
+single_gates = [
+        qml.Hadamard, 
+        qml.PauliX, qml.PauliY, qml.PauliZ, 
+        qml.S, qml.T,
+        qml.RX, qml.RY, qml.RZ
+    ]
+multi_gates = [qml.CNOT, qml.CZ, qml.Toffoli, qml.MultiControlledX]
 
 class VQETask(SynthesisTask):
     def __init__(self, hamiltonian):
-        # Find max wire index in Hamiltonian to determine n_qubits
+        gates = [single_gates, single_parametrised_gates, multi_gates]
         n_qubits = max([max(o.wires) for o in hamiltonian.ops]) + 1
-        super().__init__(n_qubits)
+        super().__init__(n_qubits, gates)
         
         self.H = hamiltonian
         self.dev = qml.device('default.qubit', wires=self.n_qubits)
@@ -27,7 +38,6 @@ class VQETask(SynthesisTask):
         print(qml.draw(self.qnode)(best_structure))
 
 def create_Hamiltonian (n_qubits=3) :
-    # Parameters for a 3-qubit TFIM
     coeffs = []
     obs = []
     J = 1.0  # Coupling constant
@@ -48,9 +58,14 @@ def create_Hamiltonian (n_qubits=3) :
     H = qml.Hamiltonian(coeffs, obs)
     return H
 
+def ground_state_energy(H):
+    H_mat = np.array(qml.matrix(H))
+    eigenvalues = np.linalg.eigvalsh(H_mat)
+    return np.min(eigenvalues)
+
 if __name__ == "__main__":
-    # Create a 3-qubit Hamiltonian
     H = create_Hamiltonian(4)
     print(H)
+    print("True ground energy = ", ground_state_energy(H))
     task = VQETask(H)
     genetic_algorithm(task)

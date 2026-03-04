@@ -1,11 +1,21 @@
 import pennylane as qml
-from TaskAgnosticGA import SynthesisTask, genetic_algorithm, single_parametrised_gates
+from TaskAgnosticGA import SynthesisTask, genetic_algorithm
 import math
+
+# --- ALLOWED GATES ---
+single_parametrised_gates = []
+single_gates = [
+        qml.Hadamard, 
+        qml.PauliX, qml.PauliY, qml.PauliZ, 
+        qml.S, qml.T
+    ]
+multi_gates = [qml.CNOT, qml.CZ, qml.Toffoli, qml.MultiControlledX]
+gates = [single_gates, single_parametrised_gates, multi_gates]
 
 class GroverTask(SynthesisTask):
     def __init__(self, target_bitstring="110"):
         n_qubits = len(target_bitstring)
-        super().__init__(n_qubits)
+        super().__init__(n_qubits, gates)
         
         self.target_idx = int(target_bitstring, 2)
         self.dev = qml.device('default.qubit', wires=self.n_qubits)
