@@ -6,10 +6,9 @@ import math
 single_parametrised_gates = []
 single_gates = [
         qml.Hadamard, 
-        qml.PauliX, qml.PauliY, qml.PauliZ, 
-        qml.S, qml.T
+        qml.PauliX, qml.PauliY, qml.PauliZ
     ]
-multi_gates = [qml.CNOT, qml.CZ]
+multi_gates = [qml.CNOT, qml.MultiControlledX]
 gates = [single_gates, single_parametrised_gates, multi_gates]
 
 class GroverTask(SynthesisTask):
@@ -24,15 +23,26 @@ class GroverTask(SynthesisTask):
         def _circuit(structure):
             for i in range(self.n_qubits): qml.Hadamard(wires=i)
             
-            num_iters = int(math.pi/4 * self.n_qubits)
+            N = 2 ** self.n_qubits
+            num_iters = int(math.pi/4 * math.sqrt(N))
             for _ in range(num_iters):
-                # Oracle
+                # ------ Oracle ------
                 qml.FlipSign(self.target_idx, wires=range(self.n_qubits))
+
+                # ------ Diffuser ------
+                # H layer
+                for wire in range(n_qubits) :
+                    qml.Hadamard(wires=wire)
+
                 # Diffuser
                 for gate, wires, theta in structure:
                     if gate in single_parametrised_gates: gate(theta, wires=wires)
                     else: gate(wires=wires)
-                    
+
+                # H layer
+                for wire in range(n_qubits) :
+                    qml.Hadamard(wires=wire)
+            
             return qml.probs(wires=range(self.n_qubits))
             
         self.qnode = _circuit
