@@ -11,7 +11,7 @@ import pennylane as qml #type: ignore
 
 # 1. Create question
 print("\n ----------- HAMILTONIAN -----------")
-H = create_Hamiltonian(n_qubits=7)
+H = create_Hamiltonian(n_qubits=12)
 print(H)
 print("True ground energy = (-)", ground_state_energy(H))
 task = VQETask(H)
@@ -21,8 +21,8 @@ print("\n -------- GENETIC ALGORITHM --------")
 warm_start_results = genetic_algorithm(
         task, 
         n_results=10,
-        max_depth=30,
-        pop_size=1000,
+        max_depth=15,
+        pop_size=500,
         num_generations=50
     )
 

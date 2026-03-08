@@ -3,7 +3,7 @@ from pennylane import numpy as pnp
 from vqe_core import create_Hamiltonian, ground_state_energy
 
 # 1. Create Hamiltonian
-n_qubits = 7
+n_qubits = 12
 H = create_Hamiltonian(n_qubits=n_qubits)
 dev = qml.device("default.qubit", wires=n_qubits)
 
@@ -20,7 +20,7 @@ def basic_entangler_ansatz(params):
     return qml.expval(H)
 
 # 3. Setup Initial Parameters
-n_layers = 7
+n_layers = 75
 
 # Templates have helper functions to tell you the required parameter shape
 ansatz_list = [
