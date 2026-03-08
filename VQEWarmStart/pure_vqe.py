@@ -1,50 +1,50 @@
+import json
 import pennylane as qml #type: ignore
 from pennylane import numpy as pnp
 from vqe_core import create_Hamiltonian, ground_state_energy
 
-# 1. Create Hamiltonian
-n_qubits = 12
-H = create_Hamiltonian(n_qubits=n_qubits)
-dev = qml.device("default.qubit", wires=n_qubits)
+n_qubits_range = range(5, 10)
+all_results = []
 
-# 2. Define standard templates as QNodes
-# We wrap them so they all take 'params' as input
-@qml.qnode(dev)
-def strongly_entangling_ansatz(params):
-    qml.StronglyEntanglingLayers(weights=params, wires=range(n_qubits))
-    return qml.expval(H)
+for n_qubits in n_qubits_range:
+    H = create_Hamiltonian(n_qubits=n_qubits)
+    dev = qml.device("default.qubit", wires=n_qubits)
+    true_ground_energy = float(ground_state_energy(H))
 
-@qml.qnode(dev)
-def basic_entangler_ansatz(params):
-    qml.BasicEntanglerLayers(weights=params, wires=range(n_qubits))
-    return qml.expval(H)
+    @qml.qnode(dev)
+    def ansatz_qnode(params):
+        qml.StronglyEntanglingLayers(weights=params, wires=range(n_qubits))
+        return qml.expval(H)
 
-# 3. Setup Initial Parameters
-n_layers = 75
+    for n_layers in range(1, 100, 5):
+        print(f"\nQubits: {n_qubits} | Layers: {n_layers}")
+        
+        # Initialize params (0 to 2*pi is better for rotations)
+        shape = qml.StronglyEntanglingLayers.shape(n_layers, n_qubits)
+        params = pnp.random.uniform(low=0, high=2*pnp.pi, size=shape, requires_grad=True) # type: ignore
+        
+        opt = qml.AdamOptimizer(stepsize=0.1)
+        energy_history = []
 
-# Templates have helper functions to tell you the required parameter shape
-ansatz_list = [
-    {
-        "name": "Strongly Entangling",
-        "qnode": strongly_entangling_ansatz,
-        "params": pnp.random.random(qml.StronglyEntanglingLayers.shape(n_layers, n_qubits), requires_grad=True) # type: ignore
-    },
-    {
-        "name": "Basic Entangler",
-        "qnode": basic_entangler_ansatz,
-        "params": pnp.random.random(qml.BasicEntanglerLayers.shape(n_layers, n_qubits), requires_grad=True) # type: ignore
-    }
-]
+        for i in range(1000):
+            params, energy = opt.step_and_cost(ansatz_qnode, params)
+            energy_history.append(float(energy))
+            
+            if i % 100 == 0:
+                print(f"  Step {i}: Energy = {energy:.6f}")
 
-# 4. Run VQE Loop
-print(f"True ground energy: {ground_state_energy(H):.6f}")
+        fitness = energy / true_ground_energy # type: ignore
+        
+        # Store metadata for visualization
+        all_results.append({
+            "n_qubits": n_qubits,
+            "n_layers": n_layers,
+            "final_energy": float(energy), # type: ignore
+            "true_energy": true_ground_energy,
+            "fitness": float(fitness),
+            "history": energy_history
+        })
 
-for entry in ansatz_list:
-    print(f"\n--- Running {entry['name']} ---")
-    params = entry['params']
-    opt = qml.AdamOptimizer(stepsize=0.2)
-    
-    for i in range(500):
-        params, energy = opt.step_and_cost(entry['qnode'], params)
-        if i % 20 == 0:
-            print(f"Step {i}: Energy = {energy:.6f}")
+# Save to JSON for the visualization script
+with open("vqe_results.json", "w") as f:
+    json.dump(all_results, f, indent=4)
